@@ -29,13 +29,17 @@ import d3dshot
 from ahk import AHK
 from ahk.window import Window
 import playsound
+import random
+import string
+import win32api
+import win32con
 
 ahk = AHK(executable_path='.\AutoHotkey\AutoHotkey.exe')
 
 speak = Dispatch("SAPI.SpVoice")
 
 Enabled = True
-version = "3.0.0"
+version = "3.2"
 
 root = tk.Tk()
 windowed = tk.IntVar()
@@ -46,9 +50,11 @@ currentWorldName = ''
 lastCheckedWorld = ''
 waitingForQuit = False
 speechText = tk.StringVar()
-abusePlanar = tk.IntVar()
+fsMode = tk.IntVar()
 fps = tk.IntVar()
+multiInstance = IntVar()
 fps.set(30)
+cachedWindow = 0
 
 mcPid = 0
 mcActualPid = 0
@@ -61,11 +67,12 @@ if sid > 0:
 def setDefaults():
     volSlider.set(50)
     windowed.set(0)
-    abusePlanar.set(0)
+    fsMode.set(0)
     resetHotkey.set('end')
     savesPath.set(expanduser("~") + "\AppData\Roaming\.minecraft\saves")
     speechText.set('Seed')
     borderHotkey.set('delete')
+    multiInstance.set(0)
     fps.set(30)
     
 def enumHandler(mcWin, ctx):
@@ -73,12 +80,22 @@ def enumHandler(mcWin, ctx):
     if title.startswith('Minecraft') and (title[-1].isdigit() or title.endswith('Singleplayer') or title.endswith('Multiplayer (LAN)')):
         style = win32gui.GetWindowLong(mcWin, -16)
         if style == 369623040:
+            if fsMode.get() == 2:
+                rect = win32gui.GetWindowRect(mcWin)
+                if rect[3] == 1080:
+                    win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 0, 0, 1920, 1027, 0x0004)
+                    return False
+                else:
+                    win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 0, 0, 1920, 1080, 0x0004)
+                    return False
             style = 382664704
             win32gui.SetWindowLong(mcWin, win32con.GWL_STYLE, style)
-            if abusePlanar.get():
-                win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 0, 290, 1920, 520, 0x0004)
+            if fsMode.get() == 3:
+                win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 650, 0, 700, 1050, 0x0004)
+            elif fsMode.get() == 1:
+                win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 0, 320, 1920, 400, 0x0004)
             else:
-                win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 500, 270, 920, 540, 0x0004)
+                win32gui.SetWindowPos(mcWin, win32con.HWND_TOP, 530, 250, 900, 550, 0x0004)
         else:
             style &= ~(0x00800000 | 0x00400000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00800000)
             win32gui.SetWindowLong(mcWin, win32con.GWL_STYLE, style)
@@ -118,10 +135,12 @@ def loadConfig():
             resetHotkey.set(settings['resetHotkey'])
         if "borderHotkey" in settings:
             borderHotkey.set(settings['borderHotkey'])
-        if "abusePlanar" in settings:
-            abusePlanar.set(settings["abusePlanar"])
+        if "fsMode" in settings:
+            fsMode.set(settings["fsMode"])
         if "fps" in settings:
             fps.set(settings['fps'])
+        if "multiInstance" in settings:
+            multiInstance.set(settings['multiInstance'])
     else:
         setDefaults()
         saveConfig()
@@ -142,7 +161,8 @@ def saveConfig():
     'resetHotkey':resetHotkey.get(),
     'fps':fps.get(),
     'borderHotkey':borderHotkey.get(),
-    'abusePlanar':abusePlanar.get()
+    'fsMode':fsMode.get(),
+    'multiInstance':multiInstance.get()
     }
     
     writeFile.write(json.dumps(settings))
@@ -150,8 +170,9 @@ def saveConfig():
     root.after(1000, saveConfig)
     
 def getMcWin():
-    global mcPid
-    return ahk.find_window(id=mcPid)
+    #global mcPid
+    return cachedWindow
+    #return ahk.find_window(id=mcPid)
     
 def getMostRecentFile(dir):
     try:
@@ -167,19 +188,19 @@ def resetRun():
     global waitingForQuit
     waitingForQuit = True
     win = getMcWin()
-    time.sleep(0.03)
+    time.sleep(0.01)
     print('reset')
     win.send('{escape}')
-    time.sleep(0.03)
+    time.sleep(0.01)
     if windowed.get():
         win.send('{shift Down}{tab}{shift Up}')
     else:
         ahk.send_input("{shift Down}{tab}{shift Up}")
-    time.sleep(0.07)
+    time.sleep(0.03)
     win.send('{enter}')
     
 def selectMC():
-    global mcPid, mcActualPid
+    global mcPid, mcActualPid, cachedWindow
     mcPid = 0
     mcLabel.config(text='Click on Minecraft',fg='red')
     root.update()
@@ -193,6 +214,7 @@ def selectMC():
             if title[-1].isdigit() or title.endswith('Singleplayer') or title.endswith('Multiplayer (LAN)'):
                 mcPid = win.id
                 mcActualPid = win.pid
+                cachedWindow = win
                 mcLabel.config(text='Found Minecraft (' + str(win.pid) + ')',fg='green')
                 print('Found MC')
                 return
@@ -207,8 +229,12 @@ loadConfig()
 root.columnconfigure(0, weight=1)
 root.columnconfigure(1, weight=1)
 
+#Checkbutton(root, text="Multi-instance mode", variable=multiInstance, font=fontStyle).grid(row=14, padx=0, sticky=E)
 Checkbutton(root, text="Unfocused mode", variable=windowed, font=fontStyle).grid(row=15, padx=0, sticky=E)
-Checkbutton(root, text="Abuse Planar", variable=abusePlanar, font=fontStyle).grid(row=16, padx=150, sticky=W)
+Radiobutton(root, text="Window", padx=7, variable=fsMode, value=0, font=fontStyle).grid(row=13, padx=150, sticky=W)
+Radiobutton(root, text="Abuse Planar", padx=7, variable=fsMode, value=1, font=fontStyle).grid(row=16, padx=150, sticky=W)
+Radiobutton(root, text="Perfect Travel", padx=7, variable=fsMode, value=2, font=fontStyle).grid(row=15, padx=150, sticky=W)
+Radiobutton(root, text="Microlensing", padx=7, variable=fsMode, value=3, font=fontStyle).grid(row=14, padx=150, sticky=W)
 
 statusLabel = Label(root, text="Running", fg='green', font=fontStyle)
 statusLabel.grid(row=1, padx=0, sticky=E)
@@ -242,7 +268,7 @@ root.resizable(False, False)
 root.title("SeedMiner v" + version)
 
 def scanForMc():
-    global mcPid, mcActualPid
+    global mcPid, mcActualPid, cachedWindow
     window = ahk.find_window(title=b'Minecraft* 1.16.1')
     if not window:
         window = ahk.find_window(title=b'Minecraft* 1.16.1 - Singleplayer')
@@ -253,6 +279,7 @@ def scanForMc():
                 return
     mcPid = window.id
     mcActualPid = int(window.pid)
+    cachedWindow = window
     mcLabel.config(text='Found Minecraft (' + str(window.pid) + ')',fg='green')
 
 def canCheck():
@@ -281,8 +308,19 @@ def canCheck():
 
 def reportSeed():
     global speechText, mcPid
-    win = ahk.find_window(id=mcPid)
-    win.send('{escape}')
+    win32api.keybd_event(0x83, 0)
+    win32api.Sleep(50)
+    win32api.keybd_event(0x83, 0, win32con.KEYEVENTF_KEYUP)
+    #title = ahk.active_window.title
+    #win = ahk.find_window(id=mcPid)
+    #win.send('{escape}')
+    #time.sleep(0.05)
+    #if not (title.startswith(b'Minecraft') and (str(title[-1]).isdigit() or title.endswith(b'Singleplayer') or title.endswith(b'Multiplayer (LAN)'))):
+    #    win.activate()
+
+    if random.random() > 0.9999 and os.path.isfile('CFIUUS_FFUISM_FFFHJDSJS.mp3'): # not a virus, just a special sound ;)
+        playsound.playsound('CFIUUS_FFUISM_FFFHJDSJS.mp3')
+        return
     if speechText.get() == '{mp3}' and os.path.isfile('seed.mp3'):
         playsound.playsound('seed.mp3')
     else:
@@ -302,33 +340,23 @@ def checkBiome():
 
 def waitForColours():
     d = d3dshot.create(capture_output="pil")
-    print('Wait for Singleplayer menu')
     win = getMcWin()
-    print('a')
     rect = win.rect
     if rect != (0, 0, 1920, 1080):
-        print('change rect because windowed')
         rect = (rect[0] + 8, rect[1] + 24, rect[2] - 16, rect[3] - 32)
-    print('b')
     rect = (rect[0] + 50, rect[1] + 200, rect[0] + 52, rect[1] + 202)
-    print('c')
-    print(rect)
     root.update()
     img = d.screenshot(region=rect)
-    print('d')
     color = img.getpixel((1, 1))
-    print('e')
-    print(color)
     startTime = time.time()
-    while (time.time() - startTime) < 0.5 and not (color[0] > 13 and color[0 < 18] and color[1] > 9 and color[1] < 15 and color[2] > 5 and color[2] < 10):
-        print('Waiting...')
+    while (time.time() - startTime) < 1.5 and not (color[0] > 13 and color[0 < 18] and color[1] > 9 and color[1] < 15 and color[2] > 5 and color[2] < 10):
         img = d.screenshot(region=rect)
         color = img.getpixel((1, 1))
-        time.sleep(0.03)
+        time.sleep(0.02)
 
 def waitForWorlds():
     waitForColours()
-    time.sleep(0.1)
+    time.sleep(0.03)
 
 def makeWorld():
     delay = 0.07
@@ -372,13 +400,27 @@ def makeWorld():
         time.sleep(delay)
     win.send('{enter}')
     time.sleep(delay)
+    time.sleep(1)
+    win32api.keybd_event(0x82, 0)
+    win32api.Sleep(20)
+    win32api.keybd_event(0x82, 0, win32con.KEYEVENTF_KEYUP)
 
 def hotkeyReset():
+    if multiInstance.get():
+        print('toggle focus')
+        if not str(ahk.active_window.pid) == str(mcActualPid):
+            print(getMcWin().pid)
+            getMcWin().activate()
+            return
+    win = getMcWin()
+    
     currentWorld = getMostRecentFile(savesPath.get() + "/*")
     if currentWorld == False:
         print('No world found')
-        return;
-    win = getMcWin()
+        return
+    win32api.keybd_event(0x84, 0)
+    win32api.Sleep(3)
+    win32api.keybd_event(0x84, 0, win32con.KEYEVENTF_KEYUP)
     if windowed.get() and win.active:
         print('unfocus')
         root.focus_force()
@@ -396,10 +438,26 @@ def hotkeyReset():
     
 def toggleBorder():
     global mcActualPid
-    try:
-        win32gui.EnumWindows(enumHandler, mcActualPid)
-    except:
-        return
+    if multiInstance.get():
+        if not str(ahk.active_window.pid) == str(mcActualPid):
+            return
+        printable = set(string.printable)
+        script = open("bd.txt", "r").read().replace("$PID_HERE$", str(mcActualPid))
+        if fsMode.get() == 3:
+            script = script.replace("$RES$", "650, 0, 700, 1050")
+        elif fsMode.get() == 2:
+            script = script.replace("$RES$", "0, 0, 1940, 1070")
+        elif fsMode.get() == 1:
+            script = script.replace("$RES$", "0, 320, 1920, 400")
+        else:
+            script = script.replace("$RES$", "530, 250, 900, 550")
+        script = ''.join(filter(lambda x: x in printable, script))
+        ahk.run_script(script, blocking=False)
+    else:
+        try:
+            win32gui.EnumWindows(enumHandler, mcActualPid)
+        except:
+            return
 
 if resetHotkey.get() != '':
     bindings = [
@@ -430,7 +488,7 @@ scanForMc()
 def mainLoop():
     if Enabled and canCheck() and mcPid != 0:
         checkBiome()
-    root.after(100, mainLoop)
+    root.after(50, mainLoop)
 root.after(0, mainLoop)
 root.after(0, checkHotkeys)
 root.after(1000, saveConfig)
