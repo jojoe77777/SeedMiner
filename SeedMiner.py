@@ -33,16 +33,19 @@ import random
 import string
 import win32api
 import win32con
+import requests
+
 
 ahk = AHK(executable_path='.\AutoHotkey\AutoHotkey.exe')
 
 speak = Dispatch("SAPI.SpVoice")
 
 Enabled = True
-version = "3.2"
+version = "3.3"
 
 root = tk.Tk()
 windowed = tk.IntVar()
+easyDiff = tk.IntVar()
 resetHotkey = tk.StringVar()
 borderHotkey = tk.StringVar()
 savesPath = StringVar()
@@ -55,6 +58,7 @@ fps = tk.IntVar()
 multiInstance = IntVar()
 fps.set(30)
 cachedWindow = 0
+jojoeScenes = False
 
 mcPid = 0
 mcActualPid = 0
@@ -74,6 +78,7 @@ def setDefaults():
     borderHotkey.set('delete')
     multiInstance.set(0)
     fps.set(30)
+    easyDiff.set(1)
     
 def enumHandler(mcWin, ctx):
     title = win32gui.GetWindowText(mcWin)
@@ -141,6 +146,10 @@ def loadConfig():
             fps.set(settings['fps'])
         if "multiInstance" in settings:
             multiInstance.set(settings['multiInstance'])
+        if "jojoeScenes" in settings:
+            jojoeScenes = True
+        if "easyDiff" in settings:
+            easyDiff.set(settings['easyDiff'])
     else:
         setDefaults()
         saveConfig()
@@ -162,7 +171,8 @@ def saveConfig():
     'fps':fps.get(),
     'borderHotkey':borderHotkey.get(),
     'fsMode':fsMode.get(),
-    'multiInstance':multiInstance.get()
+    'multiInstance':multiInstance.get(),
+    'easyDiff':easyDiff.get()
     }
     
     writeFile.write(json.dumps(settings))
@@ -236,6 +246,8 @@ Radiobutton(root, text="Abuse Planar", padx=7, variable=fsMode, value=1, font=fo
 Radiobutton(root, text="Perfect Travel", padx=7, variable=fsMode, value=2, font=fontStyle).grid(row=15, padx=150, sticky=W)
 Radiobutton(root, text="Microlensing", padx=7, variable=fsMode, value=3, font=fontStyle).grid(row=14, padx=150, sticky=W)
 
+Checkbutton(root, text="Easy difficulty", variable=easyDiff, font=fontStyle).grid(row=14, sticky=E)
+
 statusLabel = Label(root, text="Running", fg='green', font=fontStyle)
 statusLabel.grid(row=1, padx=0, sticky=E)
 latestSeedLabel = Label(root, text="", font=fontStyle, fg='blue')
@@ -294,7 +306,7 @@ def canCheck():
     if not (os.path.isdir(currentWorld + "/advancements")):
         return False
     if waitingForQuit == True:
-        try: 
+        try:
             lockFile = open(currentWorld + "/session.lock", "r")
             # fails with error 13 (permission denied) if world is running
             lockFile.read()
@@ -306,11 +318,22 @@ def canCheck():
     timeElapsed = time.time() - advCreation;
     return timeElapsed < 5 and lastCheckedWorld != os.path.basename(currentWorld) and waitingForQuit == False
 
+def switchToScene(scene):
+    if not jojoeScenes:
+        return
+    print("Switch to scene " + scene)
+    headers = {
+        'Content-type': 'application/json',
+    }
+    data = '{"scene-name":"' + scene + '"}'
+    requests.post('http://127.0.0.1:4445/emit/SetCurrentScene', headers=headers, data=data)
+
 def reportSeed():
     global speechText, mcPid
     win32api.keybd_event(0x83, 0)
     win32api.Sleep(50)
     win32api.keybd_event(0x83, 0, win32con.KEYEVENTF_KEYUP)
+    switchToScene('Stream')
     #title = ahk.active_window.title
     #win = ahk.find_window(id=mcPid)
     #win.send('{escape}')
@@ -349,8 +372,9 @@ def waitForColours():
     img = d.screenshot(region=rect)
     color = img.getpixel((1, 1))
     startTime = time.time()
-    while (time.time() - startTime) < 1.5 and not (color[0] > 13 and color[0 < 18] and color[1] > 9 and color[1] < 15 and color[2] > 5 and color[2] < 10):
+    while (time.time() - startTime) < 3 and not (color[0] > 13 and color[0 < 18] and color[1] > 9 and color[1] < 15 and color[2] > 5 and color[2] < 10):
         img = d.screenshot(region=rect)
+        print("hmm")
         color = img.getpixel((1, 1))
         time.sleep(0.02)
 
@@ -362,6 +386,8 @@ def makeWorld():
     delay = 0.07
     if fps.get() == 60:
         delay /= 2
+    elif fps.get() == 120:
+        delay /= 4
     win = getMcWin()
     time.sleep(0.1)
     win.send('{tab}')
@@ -377,7 +403,14 @@ def makeWorld():
     time.sleep(delay)
     win.send('{enter}')
     time.sleep(delay)
-    if True:
+    if os.path.isfile("attempts.txt"):
+        countFile = open("attempts.txt", 'r+')
+        counter = int(countFile.read())
+        countFile.seek(0)
+        countFile.write(str(counter + 1))
+        countFile.close()
+    time.sleep(delay)
+    if easyDiff.get():
         win.send('{tab}')
         time.sleep(delay)
         win.send('{tab}')
@@ -398,12 +431,15 @@ def makeWorld():
         time.sleep(delay)
         win.send('{tab}')
         time.sleep(delay)
+    if fps.get() == 120:
+        time.sleep(0.03)
     win.send('{enter}')
     time.sleep(delay)
     time.sleep(1)
     win32api.keybd_event(0x82, 0)
-    win32api.Sleep(20)
+    win32api.Sleep(50)
     win32api.keybd_event(0x82, 0, win32con.KEYEVENTF_KEYUP)
+    switchToScene('Loading Screen')
 
 def hotkeyReset():
     if multiInstance.get():
@@ -419,7 +455,7 @@ def hotkeyReset():
         print('No world found')
         return
     win32api.keybd_event(0x84, 0)
-    win32api.Sleep(3)
+    win32api.Sleep(10)
     win32api.keybd_event(0x84, 0, win32con.KEYEVENTF_KEYUP)
     if windowed.get() and win.active:
         print('unfocus')
